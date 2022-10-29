@@ -114,7 +114,7 @@ class NeRF(nn.Module):
 
             rgb = self.rgb_linear(h)
             outputs = torch.cat([rgb, alpha], -1)
-        else:
+        else: # 如果没有输入光线的方向，则输出5维
             outputs = self.output_linear(h)
 
         return outputs    

@@ -182,13 +182,13 @@ def create_nerf(args):
         Instantiate NeRF's MLP model.
     """
     # 对x,y,z和方向信息都进行了位置编码，输入是x,y,z三维，输出是input_ch=63维；如果use_viewdirs为真，则input_ch_views=27维；
-    embed_fn, input_ch = get_embedder(args.multires, args.i_embed) # 这里是定义论文中的位置编码
+    embed_fn, input_ch = get_embedder(args.multires, args.i_embed) # 这里是定义论文中的位置编码 # 20x3 + 3 = 63
 
     input_ch_views = 0
     embeddirs_fn = None
     if args.use_viewdirs: #  # 是否使用视点方向，影响到神经网络是否输出颜色
-        embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
-    output_ch = 5 if args.N_importance > 0 else 4 # 输出为啥是5？
+        embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed) # 3x8 + 3 = 27
+    output_ch = 5 if args.N_importance > 0 else 4 # 这个不用看
     skips = [4]
     model = NeRF(D=args.netdepth, W=args.netwidth,
                  input_ch=input_ch, output_ch=output_ch, skips=skips,
