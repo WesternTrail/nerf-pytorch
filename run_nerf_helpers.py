@@ -29,7 +29,7 @@ class Embedder:
         N_freqs = self.kwargs['num_freqs']
         
         if self.kwargs['log_sampling']:
-            freq_bands = 2.**torch.linspace(0., max_freq, steps=N_freqs)
+            freq_bands = 2.**torch.linspace(0., max_freq, steps=N_freqs) # 0-3中均匀采样4步,计算2^0,2^1,2^2,2^3
         else:
             freq_bands = torch.linspace(2.**0., 2.**max_freq, steps=N_freqs)
             
@@ -50,12 +50,12 @@ def get_embedder(multires, i=0):
         return nn.Identity(), 3
     
     embed_kwargs = {
-                'include_input' : True,
-                'input_dims' : 3,
+                'include_input' : True, # 如果为真，最终的编码结果包含原始坐标
+                'input_dims' : 3,  # x,y,z，光线方向dir
                 'max_freq_log2' : multires-1,
-                'num_freqs' : multires,
+                'num_freqs' : multires, # 位置编码公式中的L
                 'log_sampling' : True,
-                'periodic_fns' : [torch.sin, torch.cos],
+                'periodic_fns' : [torch.sin, torch.cos], # pe编码的两个基本函数
     }
     
     embedder_obj = Embedder(**embed_kwargs)
@@ -66,8 +66,6 @@ def get_embedder(multires, i=0):
 # Model
 class NeRF(nn.Module):
     def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, output_ch=4, skips=[4], use_viewdirs=False):
-        """ 
-        """
         super(NeRF, self).__init__()
         self.D = D
         self.W = W
@@ -75,7 +73,7 @@ class NeRF(nn.Module):
         self.input_ch_views = input_ch_views
         self.skips = skips
         self.use_viewdirs = use_viewdirs
-        # 生成D层全连接层，并且在skip+1层加入input_pts；
+        # 生成D层全连接层，并且在skip+1层加入embedxyz
         self.pts_linears = nn.ModuleList(
             [nn.Linear(input_ch, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch, W) for i in range(D-1)])
         
@@ -114,7 +112,7 @@ class NeRF(nn.Module):
 
             rgb = self.rgb_linear(h)
             outputs = torch.cat([rgb, alpha], -1)
-        else: # 如果没有输入光线的方向，则输出5维
+        else: # 输入中没有光线方向,输出rgb+??
             outputs = self.output_linear(h)
 
         return outputs    
@@ -153,13 +151,13 @@ class NeRF(nn.Module):
 # Ray helpers
 def get_rays(H, W, K, c2w):
     i, j = torch.meshgrid(torch.linspace(0, W-1, W), torch.linspace(0, H-1, H))  # pytorch's meshgrid has indexing='ij'
-    i = i.t()
-    j = j.t()
-    dirs = torch.stack([(i-K[0][2])/K[0][0], -(j-K[1][2])/K[1][1], -torch.ones_like(i)], -1)
+    i = i.t() # i是列
+    j = j.t() # j是行
+    dirs = torch.stack([(i-K[0][2])/K[0][0], -(j-K[1][2])/K[1][1], -torch.ones_like(i)], -1) # 注意方向
     # Rotate ray directions from camera frame to the world frame
-    rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # 光线旋转到世界坐标系下，dot product, equals to: [c2w.dot(dir) for dir in dirs]
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
-    rays_o = c2w[:3,-1].expand(rays_d.shape)
+    rays_o = c2w[:3,-1].expand(rays_d.shape) # 世界坐标系下的光线起点
     return rays_o, rays_d
 
 

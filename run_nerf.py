@@ -111,8 +111,7 @@ def render(H, W, K, chunk=1024*32, rays=None, c2w=None, ndc=True,
         viewdirs = torch.reshape(viewdirs, [-1,3]).float()
 
     sh = rays_d.shape # [..., 3]
-    if ndc:
-        # 把光线的原点移动到near平面
+    if ndc: # 使用NDC说明数据集是面向一个方向时的无界场景
         rays_o, rays_d = ndc_rays(H, W, K[0][0], 1., rays_o, rays_d)
 
     # Create ray batch
@@ -182,13 +181,13 @@ def create_nerf(args):
         Instantiate NeRF's MLP model.
     """
     # 对x,y,z和方向信息都进行了位置编码，输入是x,y,z三维，输出是input_ch=63维；如果use_viewdirs为真，则input_ch_views=27维；
-    embed_fn, input_ch = get_embedder(args.multires, args.i_embed) # 这里是定义论文中的位置编码 # 20x3 + 3 = 63
+    embed_fn, input_ch = get_embedder(args.multires, args.i_embed) # 这里是定义论文中的位置编码
 
     input_ch_views = 0
     embeddirs_fn = None
-    if args.use_viewdirs: #  # 是否使用视点方向，影响到神经网络是否输出颜色
-        embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed) # 3x8 + 3 = 27
-    output_ch = 5 if args.N_importance > 0 else 4 # 这个不用看
+    if args.use_viewdirs: # 输入中是否有光线方向
+        embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
+    output_ch = 5 if args.N_importance > 0 else 4 # 输出为啥是5？RGB不是3么
     skips = [4]
     model = NeRF(D=args.netdepth, W=args.netwidth,
                  input_ch=input_ch, output_ch=output_ch, skips=skips,
@@ -288,7 +287,7 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     rgb = torch.sigmoid(raw[...,:3])  # [N_rays, N_samples, 3]
     noise = 0.
     if raw_noise_std > 0.:
-        noise = torch.randn(raw[...,3].shape) * raw_noise_std
+        noise = torch.randn(raw[...,3].shape) * raw_noise_std # 噪声注入体积密度来正则化
 
         # Overwrite randomly sampled data if pytest
         if pytest:
@@ -370,9 +369,9 @@ def render_rays(ray_batch,
     bounds = torch.reshape(ray_batch[...,6:8], [-1,1,2])
     near, far = bounds[...,0], bounds[...,1] # [-1,1]
 
-    t_vals = torch.linspace(0., 1., steps=N_samples)
+    t_vals = torch.linspace(0., 1., steps=N_samples) # 在近平面，远平面上等间距的划分成64份
     if not lindisp:
-        z_vals = near * (1.-t_vals) + far * (t_vals)
+        z_vals = near * (1.-t_vals) + far * (t_vals) # 2-6均匀采样N_samples个
     else:
         z_vals = 1./(1./near * (1.-t_vals) + 1./far * (t_vals))
 
@@ -456,7 +455,7 @@ def config_parser():
     # 每层通道数
     parser.add_argument("--netwidth", type=int, default=256, 
                         help='channels per layer')
-    # fine网络中的层数
+    # fine网络中的网络层数层数
     parser.add_argument("--netdepth_fine", type=int, default=8, 
                         help='layers in fine network')
     # fine网络每层通道数
@@ -471,16 +470,15 @@ def config_parser():
     # 在1000次迭代中的指数学习率衰减
     parser.add_argument("--lrate_decay", type=int, default=250,
                         help='exponential learning rate decay (in 1000 steps)')
-    # 并行处理射线的数量，如果超出内存则降低
+    # 并行处理射线的数量，如果超出内存则降低，测试阶段使用
     parser.add_argument("--chunk", type=int, default=1024*32,
                         help='number of rays processed in parallel, decrease if running out of memory')
-    # 并行处理输入网络的点的数量，如果超出内存则降低
+    # 并行处理输入网络的点的数量，如果超出内存则降低，训练时使用
     parser.add_argument("--netchunk", type=int, default=1024*64,
                         help='number of pts sent through network in parallel, decrease if running out of memory')
     # no_batching指的是每次只从一张图像中选取随机射线
     parser.add_argument("--no_batching", action='store_true',
                         help='only take random rays from 1 image at a time')
-    # no_batching指的是每次只从一张图像中选取随机射线
     parser.add_argument("--no_reload", action='store_true',
                         help='do not reload weights from saved ckpt')
     # 为粗网络载入特定的权重文件
@@ -503,10 +501,10 @@ def config_parser():
     # 是否加入位置编码操作，设为0是默认采用位置编码方法，-1则无
     parser.add_argument("--i_embed", type=int, default=0,
                         help='set 0 for default positional encoding, -1 for none')
-    # 位置编码操作对于3D位置信息的所升维数，默认L=10
+    # 位置编码操作对于xyz位置信息的所升维数，默认L=10
     parser.add_argument("--multires", type=int, default=10,
                         help='log2 of max freq for positional encoding (3D location)')
-    # 位置编码操作对于2D方向信息的所升维数，默认L=4
+    # 位置编码操作对于光线方向信息的所升维数，默认L=4
     parser.add_argument("--multires_views", type=int, default=4,
                         help='log2 of max freq for positional encoding (2D direction)')
     # 加在规范化不透明度输出sigma上的噪声的标准差
@@ -619,7 +617,7 @@ def train():
         print('NEAR FAR', near, far)
 
     elif args.dataset_type == 'blender':
-        # 加载图片，每张图片的位姿（即相机拍当前照片的外参），渲染位姿，图片长宽焦距，数据集的划分索引
+        # 加载图片，每张图片的位姿（即相机拍当前照片的外参），图片长宽焦距，数据集的划分索引,render_poses用于训练到某个迭代次数，用这些pose渲染图片最后连成视频
         images, poses, render_poses, hwf, i_split = load_blender_data(args.datadir, args.half_res, args.testskip)
         print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
         i_train, i_val, i_test = i_split
@@ -792,13 +790,13 @@ def train():
                 # 生成这张图片每个像素点对应光线的原点和方向
                 rays_o, rays_d = get_rays(H, W, K, torch.Tensor(pose))  # (H, W, 3), (H, W, 3)
                 # 生成每个像素点的笛卡尔坐标，前precrop_iters生成图像中心的像素坐标，所以会缩小一半
-                if i < args.precrop_iters:
+                if i < args.precrop_iters: # 前500次迭代在整个400x400里面挖200x200的区域训练
                     dH = int(H//2 * args.precrop_frac)
                     dW = int(W//2 * args.precrop_frac)
                     coords = torch.stack(
                         torch.meshgrid(
-                            torch.linspace(H//2 - dH, H//2 + dH - 1, 2*dH), 
-                            torch.linspace(W//2 - dW, W//2 + dW - 1, 2*dW)
+                            torch.linspace(H//2 - dH, H//2 + dH - 1, 2*dH), # x从 100-299之间均匀分200个点
+                            torch.linspace(W//2 - dW, W//2 + dW - 1, 2*dW)  # y从 100-299之间均匀分200个点
                         ), -1)
                     if i == start:
                         print(f"[Config] Center cropping of size {2*dH} x {2*dW} is enabled until iter {args.precrop_iters}")                

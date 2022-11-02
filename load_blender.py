@@ -74,12 +74,12 @@ def load_blender_data(basedir, half_res=False, testskip=1):
     poses = np.concatenate(all_poses, 0)
     
     H, W = imgs[0].shape[:2]
-    camera_angle_x = float(meta['camera_angle_x'])
+    camera_angle_x = float(meta['camera_angle_x']) # fov前视角
     focal = .5 * W / np.tan(.5 * camera_angle_x)
-    # 对场景初始化一些渲染器的pose?
-    render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180,180,40+1)[:-1]], 0) # -π到π进行初始化
+    # 随机选取一点pose用于后续训练到一定迭代次数后，渲染视频用
+    render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180,180,40+1)[:-1]], 0) # -π到π转一圈生成旋转视频
     
-    if half_res:
+    if half_res: # 是否只使用一半的分辨率
         H = H//2
         W = W//2
         focal = focal/2.
