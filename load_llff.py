@@ -354,8 +354,6 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
         # render_poses = render_path_spiral(c2w_path, up, rads, focal, zdelta, zrate=.5, rots=N_rots, N=N_views)
         render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, 40 + 1)[:-1]],0)  # -π到π转一圈生成旋转视频
 
-    render_poses = np.array(render_poses).astype(np.float32)
-
     c2w = poses_avg(poses)
     print('Data:')
     print(poses.shape, images.shape, bds.shape)
