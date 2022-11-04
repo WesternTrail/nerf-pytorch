@@ -1,10 +1,34 @@
 import numpy as np
+import torch
 import os, imageio
 
 
 ########## Slightly modified version of LLFF data loading code 
 ##########  see https://github.com/Fyusion/LLFF for original
+trans_t = lambda t : torch.Tensor([
+    [1,0,0,0],
+    [0,1,0,0],
+    [0,0,1,t],
+    [0,0,0,1]]).float()
 
+rot_phi = lambda phi : torch.Tensor([
+    [1,0,0,0],
+    [0,np.cos(phi),-np.sin(phi),0],
+    [0,np.sin(phi), np.cos(phi),0],
+    [0,0,0,1]]).float()
+
+rot_theta = lambda th : torch.Tensor([
+    [np.cos(th),0,-np.sin(th),0],
+    [0,1,0,0],
+    [np.sin(th),0, np.cos(th),0],
+    [0,0,0,1]]).float()
+
+def pose_spherical(theta, phi, radius):
+    c2w = trans_t(radius) # 先做平移
+    c2w = rot_phi(phi/180.*np.pi) @ c2w # 绕x轴旋转,@是矩阵的叉乘
+    c2w = rot_theta(theta/180.*np.pi) @ c2w # 绕y轴再旋转
+    c2w = torch.Tensor(np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]])) @ c2w
+    return c2w
 def _minify(basedir, factors=[], resolutions=[]):
     needtoload = False
     for r in factors:
@@ -327,9 +351,9 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
         # 渲染时期的位姿
         # 一个list，有120（由N_views决定）个元素，每个元素shape（3，5），内参没有区别，但是外参有区别
-        render_poses = render_path_spiral(c2w_path, up, rads, focal, zdelta, zrate=.5, rots=N_rots, N=N_views)
-        
-        
+        # render_poses = render_path_spiral(c2w_path, up, rads, focal, zdelta, zrate=.5, rots=N_rots, N=N_views)
+        render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, 40 + 1)[:-1]],0)  # -π到π转一圈生成旋转视频
+
     render_poses = np.array(render_poses).astype(np.float32)
 
     c2w = poses_avg(poses)
